@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Telepilot | Robot Control & Live Stream</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body {
+      background: #0d0d0d;
+      color: #f0f0f0;
+      font-family: 'Segoe UI', sans-serif;
+      margin: 0;
+      padding: 0;
+      text-align: center;
+    }
+
+    nav {
+      background: #121212;
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+    }
+
+    nav h1 {
+      margin: 0;
+      font-size: 20px;
+      color: #00bfff;
+    }
+
+    nav a {
+      color: #f0f0f0;
+      text-decoration: none;
+      margin-left: 15px;
+      font-weight: bold;
+    }
+
+    header {
+      background: #1a1a1a;
+      padding: 15px 10px;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+    }
+
+    h2, h3 {
+      margin: 10px 0;
+    }
+
+    video {
+      width: 100%;
+      max-width: 600px;
+      margin: 20px auto;
+      border-radius: 12px;
+      box-shadow: 0 0 10px rgba(255,255,255,0.1);
+      background: #000;
+    }
+
+    .status-bar {
+      margin: 10px auto;
+      max-width: 600px;
+      display: flex;
+      justify-content: space-around;
+      font-size: 14px;
+    }
+
+    .status {
+      padding: 6px 12px;
+      border-radius: 6px;
+      background: #222;
+    }
+
+    .connected {
+      color: #00ff88;
+    }
+
+    .disconnected {
+      color: #ff4444;
+    }
+
+    .controls {
+      margin: 30px auto;
+      max-width: 500px;
+      padding: 0 10px;
+    }
+
+    .button-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    button {
+      padding: 12px;
+      font-size: 18px;
+      background: linear-gradient(145deg, #222, #333);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      transition: transform 0.2s ease, background 0.3s ease;
+    }
+
+    button:hover {
+      background: #444;
+      transform: scale(1.05);
+    }
+
+    .command-status {
+      margin-top: 20px;
+      font-size: 16px;
+      color: #ccc;
+    }
+
+    a.stream-btn {
+      display: inline-block;
+      margin-top: 40px;
+      padding: 12px 20px;
+      background: #0078D7;
+      color: white;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: bold;
+    }
+
+    @media (max-width: 600px) {
+      .button-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      button {
+        font-size: 16px;
+        padding: 10px;
+      }
+
+      video {
+        width: 95%;
+      }
+
+      .controls {
+        padding: 0 5px;
+      }
+
+      nav {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <h1>🚀 Telepilot</h1>
+    <div>
+      <a href="#">Home</a>
+      <a href="#">Dashboard</a>
+      <a href="#">Settings</a>
+    </div>
+  </nav>
+
+  <header>
+    <h2>🔴 Live Stream</h2>
+  </header>
+
+  <video id="remoteVideo" autoplay playsinline muted></video>
+
+  <div class="status-bar">
+    <div class="status" id="streamStatus">
+      Stream: <span class="disconnected">Disconnected</span>
+    </div>
+    <div class="status" id="commandStatus">
+      Command: <span class="disconnected">Disconnected</span>
+    </div>
+  </div>
+
+  <div class="controls">
+    <h3>🤖 Control Robot Commands</h3>
+    <div class="button-grid">
+      <div></div>
+      <button onclick="sendCommand('forward')">⬆️ Forward</button>
+      <div></div>
+      <button onclick="sendCommand('left')">⬅️ Left</button>
+      <button onclick="sendCommand('stop')">⏹️ Stop</button>
+      <button onclick="sendCommand('right')">➡️ Right</button>
+      <div></div>
+      <button onclick="sendCommand('backward')">⬇️ Backward</button>
+      <div></div>
+    </div>
+    <div class="command-status" id="lastCommand">
+      Last command: None
+    </div>
+  </div>
+
+  <a href="{% url 'dashboard' %}" class="stream-btn">Go to Dashboard</a>
+
+  <script>
+    const COMMAND_URL = "http://127.0.0.1:8000/command/";
+    const STREAM_URL  = "http://127.0.0.1:8000/signaling/";
+    const videoElement = document.getElementById("remoteVideo");
+
+    const streamStatusEl   = document.getElementById("streamStatus");
+    const commandStatusEl  = document.getElementById("commandStatus");
+    const lastCommandEl    = document.getElementById("lastCommand");
+
+    let commandPc       = null;
+    let streamPc        = null;
+    let commandChannel  = null;
+
+    async function postJson(url, body) {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      return resp.json();
+    }
+
+    async function getJson(url) {
+      const resp = await fetch(url);
+      return resp.json();
+    }
+
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+
+    async function setupPeer(url, isCommand = false) {
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+      });
+
+      // DataChannel for commands
+      if (isCommand) {
+        commandChannel = pc.createDataChannel("commands");
+        commandChannel.onopen = () => {
+          console.log("🟢 Command channel open");
+          commandStatusEl.innerHTML = 
+            'Command: <span class="connected">Connected</span>';
+        };
+        commandChannel.onmessage = e => {
+          console.log("📨 Robot response:", e.data);
+        };
+      } 
+      // Video track for stream
+      else {
+        pc.ontrack = event => {
+          const [stream] = event.streams;
+          if (videoElement.srcObject !== stream) {
+            videoElement.srcObject = stream;
+            videoElement.play().catch(err => 
+              console.error("Video play failed:", err));
+            console.log("📺 Remote stream attached");
+            streamStatusEl.innerHTML = 
+              'Stream: <span class="connected">Connected</span>';
+          }
+        };
+      }
+
+      // ICE candidate handler
+      pc.onicecandidate = async ev => {
+        if (!ev.candidate) return;
+        console.log("📤 sending ICE candidate");
+        await postJson(url, {
+          action:        "send_candidate",
+          candidate:     ev.candidate.candidate,
+          sdpMid:        ev.candidate.sdpMid,
+          sdpMLineIndex: ev.candidate.sdpMLineIndex
+        });
+      };
+
+      if (isCommand) {
+        // Browser offers → Server answers
+        console.log("📣 Command PC creating offer");
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        console.log("📤 Command PC sending offer");
+        await postJson(url, {
+          action: "send_offer",
+          type:   pc.localDescription.type,
+          sdp:    pc.localDescription.sdp
+        });
+
+        // Wait for answer
+        for (let i = 0; i < 10; i++) {
+          const answer = await getJson(url + "?action=get_answer");
+          if (answer.sdp) {
+            console.log("📥 Command PC got answer");
+            await pc.setRemoteDescription(answer);
+            break;
+          }
+          console.log("⏳ Waiting for command-answer…");
+          await wait(1000);
+        }
+
+        // Exchange ICE candidates
+        for (let i = 0; i < 10; i++) {
+          const data = await getJson(url + "?action=get_candidates");
+          for (const c of data.candidates || []) {
+            try {
+              await pc.addIceCandidate(c);
+              console.log("➕ Command PC added candidate");
+            } catch (err) {
+              console.error("🚨 Command ICE error:", err);
+            }
+          }
+          await wait(1000);
+        }
+
+      } else {
+        // Server offers → Browser answers
+        console.log("📣 Stream PC waiting for offer");
+        let offerData = null;
+        for (let i = 0; i < 30; i++) {
+          const data = await getJson(url + "?action=get_offer");
+          if (data.sdp) {
+            offerData = data;
+            console.log("📥 Stream PC got offer");
+            break;
+          }
+          console.log("⏳ Waiting for stream-offer…", i + 1);
+          await wait(1000);
+        }
+        if (!offerData || !offerData.sdp) {
+          throw new Error("❌ No stream offer received");
+        }
+
+        console.log("🔨 Applying remote stream offer");
+        await pc.setRemoteDescription(
+          new RTCSessionDescription(offerData)
+        );
+
+        console.log("📣 Stream PC creating answer");
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        console.log("📤 Stream PC sending answer");
+        await postJson(url, {
+          action: "send_answer",
+          type:   pc.localDescription.type,
+          sdp:    pc.localDescription.sdp
+        });
+
+        // Exchange ICE candidates
+        for (let i = 0; i < 30; i++) {
+          const data = await getJson(url + "?action=get_candidates");
+          for (const c of data.candidates || []) {
+            try {
+              await pc.addIceCandidate(c);
+              console.log("➕ Stream PC added candidate");
+            } catch (err) {
+              console.error("🚨 Stream ICE error:", err);
+            }
+          }
+          await wait(1000);
+        }
+      }
+
+      return pc;
+    }
+
+    async function startConnections() {
+      try {
+        commandPc = await setupPeer(COMMAND_URL, true);
+        streamPc  = await setupPeer(STREAM_URL, false);
+        console.log("✅ All connections established");
+      } catch (err) {
+        console.error("❌ Failed to establish connections:", err);
+      }
+    }
+
+    function sendCommand(cmd) {
+      if (commandChannel && commandChannel.readyState === "open") {
+        commandChannel.send(cmd);
+        console.log("📤 Sent command:", cmd);
+        lastCommandEl.textContent = `Last command: ${cmd}`;
+      } else {
+        console.warn("⚠️ Command channel not ready");
+        lastCommandEl.textContent = `Last command: Failed (${cmd})`;
+      }
+    }
+
+    // Kick off both peers
+    startConnections();
+  </script>
+</body>
+</html>

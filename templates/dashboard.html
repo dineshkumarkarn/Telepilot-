@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: #f4f6f8;
+            text-align: center;
+            padding-top: 50px;
+        }
+        h2 {
+            color: #333;
+        }
+        .btn {
+            display: inline-block;
+            margin: 15px;
+            padding: 12px 24px;
+            font-size: 16px;
+            text-decoration: none;
+            border-radius: 6px;
+            transition: background-color 0.3s ease;
+        }
+        .logout-btn {
+            background-color: #e74c3c;
+            color: white;
+        }
+        .logout-btn:hover {
+            background-color: #c0392b;
+        }
+        .stream-btn {
+            background-color: #3498db;
+            color: white;
+        }
+        .stream-btn:hover {
+            background-color: #2980b9;
+        }
+    </style>
+</head>
+<body>
+    <h2>Welcome, {{ request.user.username }}</h2>
+
+    <a href="{% url 'stream' %}" class="btn stream-btn">Go to Stream</a>
+    <a href="{% url 'logout' %}" class="btn logout-btn">Logout</a>
+</body>
+</html>
